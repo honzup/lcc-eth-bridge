@@ -17,18 +17,25 @@ buffer/gateway, not a node.
      ESP32-P4-ETH  ──Ethernet──▶  LAN  ──▶  JMRI (OpenLCB, GridConnect over TCP :12021)
 ```
 
-## Wiring (TCAN332DR, SOIC-8)
+## Wiring (SN65HVD230 breakout)
 
-| P4 pin | TCAN332 | Note |
-|--------|---------|------|
-| GPIO17 | 1 TXD   | |
-| GND    | 2 GND   | 100 nF ceramic across pins 3↔2, close to the IC |
-| 3.3V   | 3 VCC   | |
-| GPIO18 | 4 RXD   | |
-| CAN_L  | 6 CANL  | to LCC bus |
-| CAN_H  | 7 CANH  | to LCC bus |
+| P4 pin | SN65HVD230 | Note |
+|--------|------------|------|
+| GPIO17 | CTX (D/TXD) | |
+| GPIO18 | CRX (R/RXD) | |
+| 3.3V   | VCC        | 3.3 V, NOT 5 V |
+| GND    | GND        | share GND with any other node on the bus |
+| CAN_H  | CANH       | to bus |
+| CAN_L  | CANL       | to bus |
 
-Prove the transceiver locally first; connect to the live LCC RJ45 bus last.
+Termination: 120 Ω across CANH/CANL at each bus end. Many SN65HVD230 breakouts
+have an onboard 120 Ω (check for R120 / a jumper) — if both ends' breakouts do,
+the bus is already terminated; don't add more (measure CANH↔CANL: ~60 Ω = both
+ends terminated, ~120 Ω = one). If an RS pin is exposed and floating, tie it LOW
+(GND) for high-speed mode.
+
+(The source chat recommended a TCAN332DR; an SN65HVD230 is used instead —
+electrically equivalent, transparent to the TWAI controller.)
 
 ## Build — ESP-IDF v5.5, node-based TWAI
 
