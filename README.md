@@ -6,8 +6,8 @@ shuttles CAN frames to/from a **GridConnect TCP server on port 12021**. All
 OpenLCB node logic lives in JMRI — this box is the equivalent of an LCC
 buffer/gateway, not a node.
 
-**Status: live.** Boots on the v1.3 board, links at 100 Mbps full duplex,
-DHCP-reserved at **192.168.1.87**, GridConnect server reachable on :12021.
+**Status: live.** Boots, links at 100 Mbps full duplex, DHCP-reserved at
+**192.168.1.87**, GridConnect server reachable on :12021.
 
 ```
   LCC bus (RJ45, 125 kbit/s CAN)
@@ -30,25 +30,33 @@ DHCP-reserved at **192.168.1.87**, GridConnect server reachable on :12021.
 
 Prove the transceiver locally first; connect to the live LCC RJ45 bus last.
 
-## Toolchain — must be ESP-IDF v5.4 for this board
+## Build — ESP-IDF v5.5, node-based TWAI
 
-This board is an **early engineering-sample P4, revision v1.3**. ESP-IDF **v5.5+
-dropped support for pre-v3.0 silicon** (its bootloader demands rev v3.1 and hangs
-silently on v1.3 — do NOT `--force`). **v5.4 builds for rev v1.0+ automatically**
-(`--revision 100`) and runs fine. It's installed at `~/esp/esp-idf-v5.4`
-(`release/v5.4`).
-
-v5.4 has only the **legacy `driver/twai.h`** API; the node-based `esp_twai`
-driver is v5.5-only. See "Two firmware variants" below.
+Uses the modern node-based `esp_twai` driver (v5.5+). Installed at `~/esp/esp-idf`.
 
 ```bash
-. ~/esp/esp-idf-v5.4/export.sh
+. ~/esp/esp-idf/export.sh
 idf.py set-target esp32p4
 idf.py build
 idf.py -p /dev/ttyACM0 -b 460800 flash monitor
 ```
 
-Serial console (UART on GPIO37/38, via the onboard CH343) prints:
+### Chip revision — the one setting that depends on your silicon
+
+ESP32-P4 rev <3.0 (engineering samples) and rev ≥3.0 (production) are
+**mutually exclusive** builds. `sdkconfig.defaults` here targets the **early
+v1.x sample** this project runs on:
+
+```
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y   # enable pre-v3.0 support
+CONFIG_ESP32P4_REV_MIN_100=y           # min rev v1.0 (covers v1.3)
+```
+
+For a **production rev v3.0+ P4**, delete those two lines (the default is
+rev v3.1). Do NOT `--force` a v3.x build onto a v1.x chip or vice-versa — the
+bootloader hangs silently.
+
+Serial console (UART on GPIO37/38 via the onboard CH343) prints:
 
 ```
 main: ETH link UP (PHY negotiated)
@@ -73,13 +81,12 @@ gcc -I main test/test_gridconnect.c main/gridconnect.c -o /tmp/gctest && /tmp/gc
 # gridconnect: all tests passed
 ```
 
-## Two firmware variants
+## Branches
 
-- **`main` (current): IDF 5.4 + legacy `driver/twai.h`** — the version that runs
-  on the v1.3 board.
-- **IDF 5.5 + node-based `esp_twai` driver** — preserved at the first commit
-  (`533291b`). Use that on **production (rev v3.0+) P4 silicon**, where v5.5 runs
-  and the newer TWAI driver is available.
+- **`main`** — IDF 5.5 + node-based TWAI. Runs on this v1.3 board via the pre-v3
+  flag above; drop the flag for production v3.x silicon.
+- **`idf5.4-legacy-twai`** — IDF 5.4 + legacy `driver/twai.h`, a fallback if
+  you're pinned to 5.4 for other reasons. Same behaviour.
 
 ## Notes
 
