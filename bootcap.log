@@ -1,0 +1,63 @@
+ESP-ROM:esp32p4-eco2-20240710
+Build:Jul 10 2024
+rst:0x1 (POWERON),boot:0x20f (SPI_FAST_FLASH_BOOT)
+SPI mode:DIO, clock div:1
+load:0x4ff33ce0,len:0x1674
+load:0x4ff2abd0,len:0xe90
+load:0x4ff2cbd0,len:0x3344
+entry 0x4ff2abda
+I (25) boot: ESP-IDF 42b44c7d 2nd stage bootloader
+I (26) boot: compile time Aug 29 2026 15:18:36
+I (26) boot: Multicore bootloader
+I (27) boot: chip revision: v1.3
+I (29) boot: efuse block revision: v0.3
+I (32) boot.esp32p4: SPI Speed      : 80MHz
+I (36) boot.esp32p4: SPI Mode       : DIO
+I (40) boot.esp32p4: SPI Flash Size : 2MB
+I (44) boot: Enabling RNG early entropy source...
+I (48) boot: Partition Table:
+I (51) boot: ## Label            Usage          Type ST Offset   Length
+I (57) boot:  0 nvs              WiFi data        01 02 00009000 00006000
+I (64) boot:  1 phy_init         RF data          01 01 0000f000 00001000
+I (70) boot:  2 factory          factory app      00 00 00010000 00100000
+I (78) boot: End of partition table
+I (80) esp_image: segment 0: paddr=00010020 vaddr=40050020 size=12bc0h ( 76736) map
+I (101) esp_image: segment 1: paddr=00022be8 vaddr=30100000 size=00088h (   136) load
+I (103) esp_image: segment 2: paddr=00022c78 vaddr=4ff00000 size=0d3a0h ( 54176) load
+I (117) esp_image: segment 3: paddr=00030020 vaddr=40000020 size=41b04h (269060) map
+I (163) esp_image: segment 4: paddr=00071b2c vaddr=4ff0d3a0 size=02f08h ( 12040) load
+I (167) esp_image: segment 5: paddr=00074a3c vaddr=4ff10300 size=02674h (  9844) load
+I (174) boot: Loaded app from partition at offset 0x10000
+I (174) boot: Disabling RNG early entropy source...
+I (191) cpu_start: Multicore app
+I (199) cpu_start: GPIO 38 and 37 are used as console UART I/O pins
+I (200) cpu_start: Pro cpu start user code
+I (200) cpu_start: cpu freq: 360000000 Hz
+I (202) app_init: Application information:
+I (206) app_init: Project name:     lcc_eth_bridge
+I (210) app_init: App version:      533291b-dirty
+I (215) app_init: Compile time:     Aug 29 2026 15:18:31
+I (220) app_init: ELF file SHA256:  89876cb7e...
+I (224) app_init: ESP-IDF:          42b44c7d
+I (228) efuse_init: Min chip rev:     v1.0
+I (232) efuse_init: Max chip rev:     v1.99 
+I (236) efuse_init: Chip rev:         v1.3
+I (240) heap_init: Initializing. RAM available for dynamic allocation:
+I (246) heap_init: At 4FF14B40 len 00026480 (153 KiB): RETENT_RAM
+I (252) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
+I (257) heap_init: At 4FF40000 len 00060000 (384 KiB): RAM
+I (262) heap_init: At 50108080 len 00007F80 (31 KiB): RTCRAM
+I (267) heap_init: At 30100088 len 00001F78 (7 KiB): SPM
+I (273) spi_flash: detected chip: generic
+W (276) spi_flash: Detected flash size > 16 MB, but access beyond 16 MB is not supported for this flash model yet.
+I (286) spi_flash: flash io: dio
+W (289) spi_flash: Detected size(32768k) larger than the size in the binary image header(2048k). Using the size in the binary image header.
+I (302) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (308) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (315) main_task: Started on CPU0
+I (325) main_task: Calling app_main()
+I (395) esp_eth.netif.netif_glue: e8:f6:0a:e7:20:ef
+I (395) esp_eth.netif.netif_glue: ethernet attached to netif
+I (4395) bridge: GridConnect server on :12021
+I (4395) main: LCC <-> Ethernet bridge up
+I (4395) main_task: Returned from app_main()

@@ -6,6 +6,9 @@ shuttles CAN frames to/from a **GridConnect TCP server on port 12021**. All
 OpenLCB node logic lives in JMRI — this box is the equivalent of an LCC
 buffer/gateway, not a node.
 
+**Status: live.** Boots on the v1.3 board, links at 100 Mbps full duplex,
+DHCP-reserved at **192.168.1.87**, GridConnect server reachable on :12021.
+
 ```
   LCC bus (RJ45, 125 kbit/s CAN)
         │  CAN_H / CAN_L
@@ -27,55 +30,60 @@ buffer/gateway, not a node.
 
 Prove the transceiver locally first; connect to the live LCC RJ45 bus last.
 
-## Build / flash
+## Toolchain — must be ESP-IDF v5.4 for this board
 
-Requires **ESP-IDF v5.5+** (P4 TWAI + the node-based `esp_driver_twai` API).
+This board is an **early engineering-sample P4, revision v1.3**. ESP-IDF **v5.5+
+dropped support for pre-v3.0 silicon** (its bootloader demands rev v3.1 and hangs
+silently on v1.3 — do NOT `--force`). **v5.4 builds for rev v1.0+ automatically**
+(`--revision 100`) and runs fine. It's installed at `~/esp/esp-idf-v5.4`
+(`release/v5.4`).
+
+v5.4 has only the **legacy `driver/twai.h`** API; the node-based `esp_twai`
+driver is v5.5-only. See "Two firmware variants" below.
 
 ```bash
+. ~/esp/esp-idf-v5.4/export.sh
 idf.py set-target esp32p4
 idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
+idf.py -p /dev/ttyACM0 -b 460800 flash monitor
 ```
 
-On boot the serial console prints the DHCP address:
+Serial console (UART on GPIO37/38, via the onboard CH343) prints:
 
 ```
-ETH got IP: 192.168.1.xxx  -> point JMRI OpenLCB GridConnect here, port 12021
+main: ETH link UP (PHY negotiated)
+bridge: GridConnect server on :12021
+main: ETH got IP: 192.168.1.87  -> point JMRI ... port 12021
 ```
 
-**Reserve a DHCP lease** for the board's MAC in OPNsense (reservations live at
-.180+, outside the pool) so JMRI always finds it at the same IP.
+Board MAC `e8:f6:0a:e7:20:ef`, DHCP-reserved to **.87** in OPNsense (kept below
+the .180+ pool so the reservation isn't squatted).
 
 ## JMRI
 
 Preferences → Connections → add **OpenLCB**, system connection
-**CAN via GridConnect Network Interface**, host = the board's IP, port **12021**.
+**CAN via GridConnect Network Interface**, host = **192.168.1.87**, port **12021**.
 
-## Host test (the one bit that's actually verified here)
+## Host test for the codec
 
-The GridConnect codec is a pure C module with a desktop test — no IDF needed:
+The GridConnect codec is pure C with a desktop test — no IDF needed:
 
 ```bash
 gcc -I main test/test_gridconnect.c main/gridconnect.c -o /tmp/gctest && /tmp/gctest
 # gridconnect: all tests passed
 ```
 
-## What's NOT verified — read before trusting it
+## Two firmware variants
 
-- **The firmware has not been compiled or flashed** (no P4 / IDF here). Only the
-  GridConnect codec is proven. Expect to fix a header name or struct-field name
-  on first `idf.py build` (e.g. `rx.header.rtr`, `emac_cfg.smi_gpio`,
-  `esp_eth_mac_esp32.h`) — these moved across IDF 5.x.
-- **`main/board_config.h` Ethernet pins/PHY are guesses** and MUST be checked
-  against the P4-ETH schematic. If no DHCP lease appears, that's the cause.
-  Fastest ground truth: generate Espressif's own example, get *its* Ethernet
-  linking on this board, then copy its exact PHY/pin/clock config here:
-  `idf.py create-project-from-example "espressif/esp-idf:examples/ethernet/basic"`.
+- **`main` (current): IDF 5.4 + legacy `driver/twai.h`** — the version that runs
+  on the v1.3 board.
+- **IDF 5.5 + node-based `esp_twai` driver** — preserved at the first commit
+  (`533291b`). Use that on **production (rev v3.0+) P4 silicon**, where v5.5 runs
+  and the newer TWAI driver is available.
 
-## Scope / deliberate simplifications
+## Notes
 
-- **Single client** (JMRI). One TCP connection at a time — see the `ponytail:`
-  note in `bridge.c` to fan out to multiple.
-- **Dumb bridge, not an OpenLCB node.** If you later want the ESP itself to be
-  a node (produce/consume events without JMRI), that's OpenMRN territory —
-  more code, only worth it if the node logic must live on the ESP.
+- Single TCP client (JMRI). See the `ponytail:` note in `bridge.c` to fan out.
+- Dumb bridge, not an OpenLCB node — that's OpenMRN territory if ever needed.
+- Cosmetic boot warning: flash chip is 32 MB but only 4 MB is addressed (app uses
+  <1 MB); harmless.

@@ -1,58 +1,43 @@
 #include "bridge.h"
 #include "gridconnect.h"
 #include "board_config.h"
-#include "esp_twai.h"
-#include "esp_twai_onchip.h"
+#include "driver/twai.h"        // legacy TWAI driver (IDF 5.4: node-based esp_twai is 5.5+)
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "lwip/sockets.h"
 #include <string.h>
 
 #define TAG         "bridge"
 #define GC_PORT     12021       // OpenLCB/LCC GridConnect TCP port (JMRI connects here)
-#define LCC_BITRATE 125000      // LCC CAN bus rate
 
-static twai_node_handle_t s_node;
-static QueueHandle_t      s_rx_q;      // CAN -> net
-static SemaphoreHandle_t  s_lock;
-static int                s_client = -1;  // single JMRI connection
+static SemaphoreHandle_t s_lock;
+static int               s_client = -1;  // single JMRI connection
 // ponytail: single client + one global lock. Fan out to an fd-list if you ever
 // need more than one JMRI/tool attached at once.
 
-// ---- TWAI RX (ISR) -> queue ----
-static IRAM_ATTR bool on_rx_done(twai_node_handle_t h,
-                                 const twai_rx_done_event_data_t *ev, void *ctx) {
-    (void)ev; (void)ctx;
-    uint8_t tmp[8];
-    twai_frame_t rx = { .buffer = tmp, .buffer_len = sizeof tmp };
-    if (twai_node_receive_from_isr(h, &rx) != ESP_OK) return false;
-    can_frame_t f;
-    f.id  = rx.header.id;
-    f.ext = rx.header.ide;
-    f.rtr = rx.header.rtr;                       // if this field name differs in your IDF, adjust
-    f.dlc = twaifd_dlc2len(rx.header.dlc);
-    if (f.dlc > 8) f.dlc = 8;
-    memcpy(f.data, tmp, f.dlc);
-    BaseType_t woken = pdFALSE;
-    xQueueSendFromISR(s_rx_q, &f, &woken);
-    return woken == pdTRUE;
+static void send_line(const char *line, int n) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_client >= 0) (void)send(s_client, line, n, 0); // net_task reaps a dead fd
+    xSemaphoreGive(s_lock);
 }
 
-// ---- CAN -> net ----
-static void can_to_net_task(void *arg) {
+// ---- CAN -> net: blocking receive loop (legacy driver has no ISR callback) ----
+static void can_rx_task(void *arg) {
     (void)arg;
-    can_frame_t f;
+    twai_message_t m;
     char line[32];
     for (;;) {
-        if (xQueueReceive(s_rx_q, &f, portMAX_DELAY) != pdTRUE) continue;
+        if (twai_receive(&m, portMAX_DELAY) != ESP_OK) continue;
+        can_frame_t f;
+        f.id  = m.identifier;
+        f.ext = m.extd;
+        f.rtr = m.rtr;
+        f.dlc = m.data_length_code > 8 ? 8 : m.data_length_code;
+        memcpy(f.data, m.data, f.dlc);
         int n = gc_encode(&f, line, sizeof line);
-        if (n < 0) continue;
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        if (s_client >= 0) (void)send(s_client, line, n, 0); // net_task reaps a dead fd
-        xSemaphoreGive(s_lock);
+        if (n > 0) send_line(line, n);
     }
 }
 
@@ -69,9 +54,13 @@ static void feed_byte(char c) {
         in = false;
         can_frame_t f;
         if (gc_decode(buf, &f) == 0) {
-            twai_frame_t tx = { .header.id = f.id, .header.ide = f.ext,
-                                .buffer = f.data, .buffer_len = f.dlc };
-            twai_node_transmit(s_node, &tx, pdMS_TO_TICKS(10));
+            twai_message_t m = {0};
+            m.identifier       = f.id;
+            m.extd             = f.ext;
+            m.rtr              = f.rtr;
+            m.data_length_code = f.dlc;
+            memcpy(m.data, f.data, f.dlc);
+            twai_transmit(&m, pdMS_TO_TICKS(10));
         }
         // malformed line silently dropped (garbled/hostile input at the trust boundary)
     }
@@ -108,20 +97,15 @@ static void net_task(void *arg) {
 }
 
 void bridge_start(void) {
-    s_rx_q = xQueueCreate(32, sizeof(can_frame_t));
     s_lock = xSemaphoreCreateMutex();
 
-    twai_onchip_node_config_t cfg = {
-        .io_cfg.tx           = BOARD_TWAI_TX_GPIO,
-        .io_cfg.rx           = BOARD_TWAI_RX_GPIO,
-        .bit_timing.bitrate  = LCC_BITRATE,
-        .tx_queue_depth      = 16,
-    };
-    ESP_ERROR_CHECK(twai_new_node_onchip(&cfg, &s_node));
-    twai_event_callbacks_t cbs = { .on_rx_done = on_rx_done };
-    ESP_ERROR_CHECK(twai_node_register_event_callbacks(s_node, &cbs, NULL));
-    ESP_ERROR_CHECK(twai_node_enable(s_node));
+    twai_general_config_t g = TWAI_GENERAL_CONFIG_DEFAULT(
+        BOARD_TWAI_TX_GPIO, BOARD_TWAI_RX_GPIO, TWAI_MODE_NORMAL);
+    twai_timing_config_t  t = TWAI_TIMING_CONFIG_125KBITS();   // LCC bus rate
+    twai_filter_config_t  fcfg = TWAI_FILTER_CONFIG_ACCEPT_ALL();
+    ESP_ERROR_CHECK(twai_driver_install(&g, &t, &fcfg));
+    ESP_ERROR_CHECK(twai_start());
 
-    xTaskCreate(can_to_net_task, "can2net", 4096, NULL, 10, NULL);
-    xTaskCreate(net_task,        "net",     4096, NULL,  9, NULL);
+    xTaskCreate(can_rx_task, "can_rx", 4096, NULL, 10, NULL);
+    xTaskCreate(net_task,    "net",    4096, NULL,  9, NULL);
 }
