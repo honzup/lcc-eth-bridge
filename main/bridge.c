@@ -50,6 +50,9 @@ static void can_to_net_task(void *arg) {
         if (xQueueReceive(s_rx_q, &f, portMAX_DELAY) != pdTRUE) continue;
         int n = gc_encode(&f, line, sizeof line);
         if (n < 0) continue;
+#ifdef LCC_SELFTEST
+        ESP_LOGI(TAG, "SELFTEST RX  %s", line);   // frame looped back to us
+#endif
         xSemaphoreTake(s_lock, portMAX_DELAY);
         if (s_client >= 0) (void)send(s_client, line, n, 0); // net_task reaps a dead fd
         xSemaphoreGive(s_lock);
@@ -76,6 +79,26 @@ static void feed_byte(char c) {
         // malformed line silently dropped (garbled/hostile input at the trust boundary)
     }
 }
+
+#ifdef LCC_SELFTEST
+// Solo bring-up: transmit a test frame every second. With enable_self_test the
+// TX needs no ACK (no second node), and enable_loopback returns it to on_rx_done,
+// so you should see a matching SELFTEST RX line for every SELFTEST TX.
+static void selftest_task(void *arg) {
+    (void)arg;
+    uint8_t data[8] = {0xDE,0xAD,0xBE,0xEF,0x00,0x00,0x00,0x00};
+    uint32_t seq = 0;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        data[7] = (uint8_t)seq;
+        twai_frame_t tx = { .header.id = 0x0AAAAAAA, .header.ide = true,
+                            .buffer = data, .buffer_len = sizeof data };
+        esp_err_t e = twai_node_transmit(s_node, &tx, pdMS_TO_TICKS(100));
+        ESP_LOGI(TAG, "SELFTEST TX  id=0x0AAAAAAA seq=%lu -> %s",
+                 (unsigned long)seq++, esp_err_to_name(e));
+    }
+}
+#endif
 
 static void net_task(void *arg) {
     (void)arg;
@@ -117,11 +140,25 @@ void bridge_start(void) {
         .bit_timing.bitrate  = LCC_BITRATE,
         .tx_queue_depth      = 16,
     };
+#ifdef LCC_SELFTEST
+    cfg.flags.enable_self_test = true;   // TX completes without an ACK (no 2nd node)
+    cfg.flags.enable_loopback  = true;   // receive our own transmitted frames
+#endif
     ESP_ERROR_CHECK(twai_new_node_onchip(&cfg, &s_node));
+
+    // Accept-all filter (mask=0 → every bit "don't care"). LCC is all 29-bit
+    // extended IDs. Without this the node receives nothing — bus→JMRI would be dead.
+    twai_mask_filter_config_t fc = { .id = 0, .mask = 0, .is_ext = true };
+    ESP_ERROR_CHECK(twai_node_config_mask_filter(s_node, 0, &fc));
+
     twai_event_callbacks_t cbs = { .on_rx_done = on_rx_done };
     ESP_ERROR_CHECK(twai_node_register_event_callbacks(s_node, &cbs, NULL));
     ESP_ERROR_CHECK(twai_node_enable(s_node));
 
     xTaskCreate(can_to_net_task, "can2net", 4096, NULL, 10, NULL);
     xTaskCreate(net_task,        "net",     4096, NULL,  9, NULL);
+#ifdef LCC_SELFTEST
+    ESP_LOGW(TAG, "SELF-TEST MODE: no-ACK + loopback, TX every 1s");
+    xTaskCreate(selftest_task,   "selftest", 3072, NULL, 8, NULL);
+#endif
 }
