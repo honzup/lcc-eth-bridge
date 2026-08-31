@@ -1,5 +1,7 @@
 #include "board_config.h"
 #include "bridge.h"
+#include "ota.h"
+#include "esp_ota_ops.h"
 #include "esp_log.h"
 #include "esp_event.h"
 #include "esp_netif.h"
@@ -14,6 +16,23 @@ static void on_got_ip(void *arg, esp_event_base_t base, int32_t id, void *data) 
     ip_event_got_ip_t *e = data;
     ESP_LOGI(TAG, "ETH got IP: " IPSTR "  -> point JMRI OpenLCB GridConnect here, port 12021",
              IP2STR(&e->ip_info.ip));
+
+    // Runs once. DHCP renewals re-fire GOT_IP; httpd_start() must not run twice.
+    static bool net_up_done = false;
+    if (net_up_done) return;
+    net_up_done = true;
+
+    // Network is confirmed healthy (bridge_start() already ran in app_main).
+    // If we booted a freshly-OTA'd image it's PENDING_VERIFY: mark it good now,
+    // else the bootloader rolls back on the next reset. No-op after a cable flash.
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    esp_ota_img_states_t st;
+    if (esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
+        ESP_LOGI(TAG, "OTA image healthy, cancelling rollback");
+        esp_ota_mark_app_valid_cancel_rollback();
+    }
+
+    ota_server_start();   // LAN push-OTA (only if built with OTA_TOKEN)
 }
 
 // Link diagnostics: distinguishes "no link" from "PHY not answering".
