@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "lwip/sockets.h"
+#include <sys/time.h>
 #include <string.h>
 
 #define TAG         "bridge"
@@ -17,6 +18,8 @@
 
 static twai_node_handle_t s_node;
 static QueueHandle_t      s_rx_q;      // CAN -> net
+static QueueHandle_t      s_tx_q;      // net -> CAN (by value; owns the frame across transmit)
+static volatile uint32_t  s_tx_drops = 0;  // frames dropped when s_tx_q is full (backpressure)
 static SemaphoreHandle_t  s_lock;
 static int                s_client = -1;  // single JMRI connection
 // ponytail: single client + one global lock. Fan out to an fd-list if you ever
@@ -53,9 +56,29 @@ static void can_to_net_task(void *arg) {
 #ifdef LCC_SELFTEST
         ESP_LOGI(TAG, "SELFTEST RX  %s", line);   // frame looped back to us
 #endif
+        // ponytail: keep the lock across send() rather than copy-fd-then-send.
+        // A bare copy would race net_task closing/reusing the fd (send to a stale
+        // or reassigned descriptor). The send is bounded instead by SO_SNDTIMEO
+        // (set in net_task), so the hold is capped at that timeout, not forever.
         xSemaphoreTake(s_lock, portMAX_DELAY);
         if (s_client >= 0) (void)send(s_client, line, n, 0); // net_task reaps a dead fd
         xSemaphoreGive(s_lock);
+    }
+}
+
+// ---- net -> CAN transmit task ----
+// Owns each frame by value for the whole twai_node_transmit() call. The node
+// driver stores the caller's twai_frame_t pointer (and its .buffer) and reads it
+// later from the TX-done ISR, so the frame MUST outlive the call — a stack local
+// in feed_byte did not, causing a use-after-free / LoadProhibited panic.
+static void can_tx_task(void *arg) {
+    (void)arg;
+    can_frame_t f;
+    for (;;) {
+        if (xQueueReceive(s_tx_q, &f, portMAX_DELAY) != pdTRUE) continue;
+        twai_frame_t tx = { .header.id = f.id, .header.ide = f.ext,
+                            .buffer = f.data, .buffer_len = f.dlc };
+        twai_node_transmit(s_node, &tx, portMAX_DELAY); // this task owns f for the whole call
     }
 }
 
@@ -72,9 +95,10 @@ static void feed_byte(char c) {
         in = false;
         can_frame_t f;
         if (gc_decode(buf, &f) == 0) {
-            twai_frame_t tx = { .header.id = f.id, .header.ide = f.ext,
-                                .buffer = f.data, .buffer_len = f.dlc };
-            twai_node_transmit(s_node, &tx, pdMS_TO_TICKS(10));
+            // Non-blocking hand-off to can_tx_task: the TCP reader must never block
+            // on CAN. A full queue drops the frame (OpenLCB retries) — drop-count
+            // backpressure rather than stalling the whole net path.
+            if (xQueueSend(s_tx_q, &f, 0) != pdTRUE) s_tx_drops++;
         }
         // malformed line silently dropped (garbled/hostile input at the trust boundary)
     }
@@ -116,6 +140,14 @@ static void net_task(void *arg) {
     for (;;) {
         int c = accept(srv, NULL, NULL);
         if (c < 0) continue;
+        // Harden the client socket: low latency for tiny GridConnect lines, detect
+        // a silently-dropped peer, and bound a stalled send() (this timeout is what
+        // caps can_to_net_task's lock hold above).
+        int one = 1;
+        setsockopt(c, IPPROTO_TCP, TCP_NODELAY,  &one, sizeof one);
+        setsockopt(c, SOL_SOCKET,  SO_KEEPALIVE, &one, sizeof one);
+        struct timeval snd_to = { .tv_sec = 5, .tv_usec = 0 };
+        setsockopt(c, SOL_SOCKET,  SO_SNDTIMEO,  &snd_to, sizeof snd_to);
         ESP_LOGI(TAG, "JMRI connected");
         xSemaphoreTake(s_lock, portMAX_DELAY); s_client = c; xSemaphoreGive(s_lock);
         char rb[128];
@@ -132,6 +164,7 @@ static void net_task(void *arg) {
 
 void bridge_start(void) {
     s_rx_q = xQueueCreate(32, sizeof(can_frame_t));
+    s_tx_q = xQueueCreate(32, sizeof(can_frame_t));
     s_lock = xSemaphoreCreateMutex();
 
     twai_onchip_node_config_t cfg = {
@@ -156,6 +189,7 @@ void bridge_start(void) {
     ESP_ERROR_CHECK(twai_node_enable(s_node));
 
     xTaskCreate(can_to_net_task, "can2net", 4096, NULL, 10, NULL);
+    xTaskCreate(can_tx_task,     "can_tx",  4096, NULL,  9, NULL);
     xTaskCreate(net_task,        "net",     4096, NULL,  9, NULL);
 #ifdef LCC_SELFTEST
     ESP_LOGW(TAG, "SELF-TEST MODE: no-ACK + loopback, TX every 1s");
