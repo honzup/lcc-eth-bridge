@@ -15,7 +15,10 @@
 #define TAG         "bridge"
 #define GC_PORT     12021       // OpenLCB/LCC GridConnect TCP port (JMRI connects here)
 #define LCC_BITRATE 125000      // LCC CAN bus rate
-#define TX_Q_LEN    32           // s_tx_q depth; kept as one constant for the queue + its stats getter
+#define TX_Q_LEN    1024         // s_tx_q depth (net->CAN). Deep enough to absorb JMRI TCP write
+                                 // bursts that the slow 125kbit CAN drains behind (was 32 -> a
+                                 // multi-frame CDI write overflowed it and silently dropped frames,
+                                 // corrupting the write; ~16KB @ sizeof(can_frame_t), trivial on P4).
 
 static twai_node_handle_t s_node;
 static QueueHandle_t      s_rx_q;      // CAN -> net
