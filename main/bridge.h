@@ -14,6 +14,11 @@ uint32_t bridge_tx_drops(void);
 // since boot, *size = queue capacity. Any pointer may be NULL to skip it.
 void bridge_tx_q_stats(uint32_t *now, uint32_t *max, uint32_t *size);
 
+// CAN->net queue: *drops = frames the RX ISR couldn't enqueue (queue full),
+// *now/*max/*size mirror bridge_tx_q_stats() for s_rx_q. Any pointer may be
+// NULL to skip it.
+void bridge_rx_q_stats(uint32_t *drops, uint32_t *now, uint32_t *max, uint32_t *size);
+
 // TWAI node health, from twai_node_get_info(). state mirrors
 // twai_error_state_t (0=ACTIVE 1=WARNING 2=PASSIVE 3=BUS_OFF) without
 // pulling TWAI headers into every includer of bridge.h.

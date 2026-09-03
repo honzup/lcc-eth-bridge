@@ -120,10 +120,13 @@ static esp_err_t status_get(httpd_req_t *req) {
     uint32_t tx_q_now = 0, tx_q_max = 0, tx_q_size = 0;
     bridge_tx_q_stats(&tx_q_now, &tx_q_max, &tx_q_size);
 
+    uint32_t rx_drops = 0, rx_q_now = 0, rx_q_max = 0, rx_q_size = 0;
+    bridge_rx_q_stats(&rx_drops, &rx_q_now, &rx_q_max, &rx_q_size);
+
     bridge_can_health_t h;
     bool have_health = bridge_can_health(&h);
 
-    char body[512];
+    char body[640];
     int n = snprintf(body, sizeof(body),
         "lcc-eth-bridge OTA\n"
         "running partition: %s\n"
@@ -131,10 +134,12 @@ static esp_err_t status_get(httpd_req_t *req) {
         "version: %s\n"
         "idf: %s\n"
         "tx_drops: %lu\n"
-        "tx_q_now: %lu  tx_q_max: %lu  tx_q_size: %lu\n",
+        "tx_q_now: %lu  tx_q_max: %lu  tx_q_size: %lu\n"
+        "rx_drops: %lu  rx_q_now: %lu  rx_q_max: %lu  rx_q_size: %lu\n",
         run ? run->label : "?", app->project_name, app->version, esp_get_idf_version(),
         (unsigned long)bridge_tx_drops(),
-        (unsigned long)tx_q_now, (unsigned long)tx_q_max, (unsigned long)tx_q_size);
+        (unsigned long)tx_q_now, (unsigned long)tx_q_max, (unsigned long)tx_q_size,
+        (unsigned long)rx_drops, (unsigned long)rx_q_now, (unsigned long)rx_q_max, (unsigned long)rx_q_size);
 
     if (have_health) {
         n += snprintf(body + n, sizeof(body) - n,

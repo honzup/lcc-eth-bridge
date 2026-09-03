@@ -19,12 +19,15 @@
                                  // bursts that the slow 125kbit CAN drains behind (was 32 -> a
                                  // multi-frame CDI write overflowed it and silently dropped frames,
                                  // corrupting the write; ~16KB @ sizeof(can_frame_t), trivial on P4).
+#define RX_Q_LEN    32           // s_rx_q depth (CAN->net); unchanged, named for its stats getter
 
 static twai_node_handle_t s_node;
 static QueueHandle_t      s_rx_q;      // CAN -> net
 static QueueHandle_t      s_tx_q;      // net -> CAN (by value; owns the frame across transmit)
 static volatile uint32_t  s_tx_drops = 0;  // frames dropped when s_tx_q is full (backpressure)
 static volatile uint32_t  s_tx_q_max = 0;  // peak s_tx_q occupancy seen since boot (observability)
+static volatile uint32_t  s_rx_drops = 0;  // frames dropped when s_rx_q is full (ISR couldn't enqueue)
+static volatile uint32_t  s_rx_q_max = 0;  // peak s_rx_q occupancy seen since boot (observability)
 static SemaphoreHandle_t  s_lock;
 static int                s_client = -1;  // single JMRI connection
 // ponytail: single client + one global lock. Fan out to an fd-list if you ever
@@ -45,7 +48,9 @@ static IRAM_ATTR bool on_rx_done(twai_node_handle_t h,
     if (f.dlc > 8) f.dlc = 8;
     memcpy(f.data, tmp, f.dlc);
     BaseType_t woken = pdFALSE;
-    xQueueSendFromISR(s_rx_q, &f, &woken);
+    if (xQueueSendFromISR(s_rx_q, &f, &woken) != pdTRUE) s_rx_drops++;
+    UBaseType_t w = uxQueueMessagesWaitingFromISR(s_rx_q);
+    if (w > s_rx_q_max) s_rx_q_max = w;
     return woken == pdTRUE;
 }
 
@@ -170,7 +175,7 @@ static void net_task(void *arg) {
 }
 
 void bridge_start(void) {
-    s_rx_q = xQueueCreate(32, sizeof(can_frame_t));
+    s_rx_q = xQueueCreate(RX_Q_LEN, sizeof(can_frame_t));
     s_tx_q = xQueueCreate(TX_Q_LEN, sizeof(can_frame_t));
     s_lock = xSemaphoreCreateMutex();
 
@@ -212,6 +217,13 @@ void bridge_tx_q_stats(uint32_t *now, uint32_t *max, uint32_t *size) {
     if (now)  *now  = (uint32_t)uxQueueMessagesWaiting(s_tx_q);
     if (max)  *max  = s_tx_q_max;
     if (size) *size = TX_Q_LEN;
+}
+
+void bridge_rx_q_stats(uint32_t *drops, uint32_t *now, uint32_t *max, uint32_t *size) {
+    if (drops) *drops = s_rx_drops;
+    if (now)   *now   = (uint32_t)uxQueueMessagesWaiting(s_rx_q);
+    if (max)   *max   = s_rx_q_max;
+    if (size)  *size  = RX_Q_LEN;
 }
 
 bool bridge_can_health(bridge_can_health_t *h) {
