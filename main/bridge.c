@@ -15,11 +15,13 @@
 #define TAG         "bridge"
 #define GC_PORT     12021       // OpenLCB/LCC GridConnect TCP port (JMRI connects here)
 #define LCC_BITRATE 125000      // LCC CAN bus rate
+#define TX_Q_LEN    32           // s_tx_q depth; kept as one constant for the queue + its stats getter
 
 static twai_node_handle_t s_node;
 static QueueHandle_t      s_rx_q;      // CAN -> net
 static QueueHandle_t      s_tx_q;      // net -> CAN (by value; owns the frame across transmit)
 static volatile uint32_t  s_tx_drops = 0;  // frames dropped when s_tx_q is full (backpressure)
+static volatile uint32_t  s_tx_q_max = 0;  // peak s_tx_q occupancy seen since boot (observability)
 static SemaphoreHandle_t  s_lock;
 static int                s_client = -1;  // single JMRI connection
 // ponytail: single client + one global lock. Fan out to an fd-list if you ever
@@ -99,6 +101,8 @@ static void feed_byte(char c) {
             // on CAN. A full queue drops the frame (OpenLCB retries) — drop-count
             // backpressure rather than stalling the whole net path.
             if (xQueueSend(s_tx_q, &f, 0) != pdTRUE) s_tx_drops++;
+            uint32_t occ = (uint32_t)uxQueueMessagesWaiting(s_tx_q);
+            if (occ > s_tx_q_max) s_tx_q_max = occ;
         }
         // malformed line silently dropped (garbled/hostile input at the trust boundary)
     }
@@ -164,7 +168,7 @@ static void net_task(void *arg) {
 
 void bridge_start(void) {
     s_rx_q = xQueueCreate(32, sizeof(can_frame_t));
-    s_tx_q = xQueueCreate(32, sizeof(can_frame_t));
+    s_tx_q = xQueueCreate(TX_Q_LEN, sizeof(can_frame_t));
     s_lock = xSemaphoreCreateMutex();
 
     twai_onchip_node_config_t cfg = {
@@ -195,4 +199,26 @@ void bridge_start(void) {
     ESP_LOGW(TAG, "SELF-TEST MODE: no-ACK + loopback, TX every 1s");
     xTaskCreate(selftest_task,   "selftest", 3072, NULL, 8, NULL);
 #endif
+}
+
+// ---- Observability getters (read-only; called from ota.c's status page) ----
+
+uint32_t bridge_tx_drops(void) { return s_tx_drops; }
+
+void bridge_tx_q_stats(uint32_t *now, uint32_t *max, uint32_t *size) {
+    if (now)  *now  = (uint32_t)uxQueueMessagesWaiting(s_tx_q);
+    if (max)  *max  = s_tx_q_max;
+    if (size) *size = TX_Q_LEN;
+}
+
+bool bridge_can_health(bridge_can_health_t *h) {
+    if (!s_node) return false;   // called before bridge_start() has run
+    twai_node_status_t st;
+    twai_node_record_t rec;
+    if (twai_node_get_info(s_node, &st, &rec) != ESP_OK) return false;
+    h->state           = (int)st.state;
+    h->tx_error_count  = st.tx_error_count;
+    h->rx_error_count  = st.rx_error_count;
+    h->bus_err_num     = rec.bus_err_num;
+    return true;
 }

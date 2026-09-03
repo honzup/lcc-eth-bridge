@@ -1,4 +1,5 @@
 #include "ota.h"
+#include "bridge.h"
 #include "esp_log.h"
 #include "esp_http_server.h"
 #include "esp_ota_ops.h"
@@ -100,17 +101,50 @@ static esp_err_t update_post(httpd_req_t *req) {
 }
 #endif // OTA_TOKEN
 
+// twai_error_state_t as a string, without pulling TWAI headers into ota.c
+// (bridge_can_health_t.state carries the same values as plain int).
+static const char *can_state_str(int s) {
+    switch (s) {
+        case 0: return "ACTIVE";
+        case 1: return "WARNING";
+        case 2: return "PASSIVE";
+        case 3: return "BUS_OFF";
+        default: return "?";
+    }
+}
+
 static esp_err_t status_get(httpd_req_t *req) {
     const esp_partition_t *run = esp_ota_get_running_partition();
     const esp_app_desc_t *app = esp_app_get_description();
-    char body[256];
+
+    uint32_t tx_q_now = 0, tx_q_max = 0, tx_q_size = 0;
+    bridge_tx_q_stats(&tx_q_now, &tx_q_max, &tx_q_size);
+
+    bridge_can_health_t h;
+    bool have_health = bridge_can_health(&h);
+
+    char body[512];
     int n = snprintf(body, sizeof(body),
         "lcc-eth-bridge OTA\n"
         "running partition: %s\n"
         "project: %s\n"
         "version: %s\n"
-        "idf: %s\n",
-        run ? run->label : "?", app->project_name, app->version, esp_get_idf_version());
+        "idf: %s\n"
+        "tx_drops: %lu\n"
+        "tx_q_now: %lu  tx_q_max: %lu  tx_q_size: %lu\n",
+        run ? run->label : "?", app->project_name, app->version, esp_get_idf_version(),
+        (unsigned long)bridge_tx_drops(),
+        (unsigned long)tx_q_now, (unsigned long)tx_q_max, (unsigned long)tx_q_size);
+
+    if (have_health) {
+        n += snprintf(body + n, sizeof(body) - n,
+            "can_state: %s  tx_err: %u  rx_err: %u  bus_err: %lu\n",
+            can_state_str(h.state), h.tx_error_count, h.rx_error_count,
+            (unsigned long)h.bus_err_num);
+    } else {
+        n += snprintf(body + n, sizeof(body) - n, "can_state: unavailable\n");
+    }
+
     httpd_resp_set_type(req, "text/plain");
     httpd_resp_send(req, body, n);
     return ESP_OK;
