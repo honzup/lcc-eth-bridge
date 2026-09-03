@@ -4,6 +4,7 @@
 #include "esp_twai.h"
 #include "esp_twai_onchip.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"   // esp_rom_delay_us — pace multi-frame CAN-TX bursts
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -15,6 +16,13 @@
 #define TAG         "bridge"
 #define GC_PORT     12021       // OpenLCB/LCC GridConnect TCP port (JMRI connects here)
 #define LCC_BITRATE 125000      // LCC CAN bus rate
+// Inter-frame pacing (us) applied ONLY during a multi-frame burst (more frames
+// already queued). A datagram's CAN frames are otherwise delivered back-to-back
+// faster than an OpenMRNLite node services its TWAI RX, so it silently drops a
+// MIDDLE frame -> the sequence-number-less reassembler stitches survivors ->
+// truncated CDI writes (all fleet nodes; proven 2026-09-03: 4-frame writes
+// mangle, 2-frame chunks land clean). Lone frames (events) are NOT paced.
+#define CAN_TX_PACE_US 2500
 #define TX_Q_LEN    1024         // s_tx_q depth (net->CAN). Deep enough to absorb JMRI TCP write
                                  // bursts that the slow 125kbit CAN drains behind (was 32 -> a
                                  // multi-frame CDI write overflowed it and silently dropped frames,
@@ -89,6 +97,11 @@ static void can_tx_task(void *arg) {
         twai_frame_t tx = { .header.id = f.id, .header.ide = f.ext,
                             .buffer = f.data, .buffer_len = f.dlc };
         twai_node_transmit(s_node, &tx, portMAX_DELAY); // this task owns f for the whole call
+        // Pace multi-frame datagram bursts so the receiving node's TWAI RX keeps
+        // up. Only when more frames are already queued (i.e. mid-datagram) — a
+        // lone frame (a normal event) is sent immediately, no added latency.
+        if (uxQueueMessagesWaiting(s_tx_q) > 0)
+            esp_rom_delay_us(CAN_TX_PACE_US);
     }
 }
 
