@@ -1,8 +1,8 @@
 #pragma once
 // ===================== Waveshare ESP32-P4-ETH board map =====================
 // TWAI (CAN) -> TCAN332DR transceiver
-#define BOARD_TWAI_TX_GPIO   17   // -> TCAN332 pin 1 (TXD)
-#define BOARD_TWAI_RX_GPIO   18   // <- TCAN332 pin 4 (RXD)
+#define BOARD_TWAI_TX_GPIO   20   // -> TCAN332 pin 1 (TXD)
+#define BOARD_TWAI_RX_GPIO   21   // <- TCAN332 pin 4 (RXD)
 
 // ============================ VERIFY THESE ==================================
 // The Ethernet pin/PHY map is the ONE thing that can't be confirmed remotely —
