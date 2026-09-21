@@ -38,6 +38,7 @@ static volatile uint32_t  s_rx_drops = 0;  // frames dropped when s_rx_q is full
 static volatile uint32_t  s_rx_q_max = 0;  // peak s_rx_q occupancy seen since boot (observability)
 static SemaphoreHandle_t  s_lock;
 static int                s_client = -1;  // single JMRI connection
+static TaskHandle_t       s_recover_task = NULL;  // notified from ISR on BUS_OFF
 // ponytail: single client + one global lock. Fan out to an fd-list if you ever
 // need more than one JMRI/tool attached at once.
 
@@ -60,6 +61,26 @@ static IRAM_ATTR bool on_rx_done(twai_node_handle_t h,
     UBaseType_t w = uxQueueMessagesWaitingFromISR(s_rx_q);
     if (w > s_rx_q_max) s_rx_q_max = w;
     return woken == pdTRUE;
+}
+
+// ---- TWAI state change (ISR): defer BUS_OFF recovery to a task ----
+static IRAM_ATTR bool on_state_change(twai_node_handle_t h,
+                                      const twai_state_change_event_data_t *e, void *ctx) {
+    (void)h; (void)ctx;
+    if (e->new_sta != TWAI_ERROR_BUS_OFF) return false;
+    BaseType_t hpw = pdFALSE;
+    vTaskNotifyGiveFromISR(s_recover_task, &hpw);
+    return hpw == pdTRUE;
+}
+
+static void recover_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        ESP_LOGW(TAG, "CAN bus-off -> recovering");
+        esp_err_t err = twai_node_recover(s_node);
+        ESP_LOGW(TAG, "twai_node_recover: %s", esp_err_to_name(err));
+    }
 }
 
 // ---- CAN -> net ----
@@ -209,7 +230,12 @@ void bridge_start(void) {
     twai_mask_filter_config_t fc = { .id = 0, .mask = 0, .is_ext = true };
     ESP_ERROR_CHECK(twai_node_config_mask_filter(s_node, 0, &fc));
 
-    twai_event_callbacks_t cbs = { .on_rx_done = on_rx_done };
+    // Create the recovery task before registering callbacks so s_recover_task is
+    // valid the moment the state-change ISR could fire.
+    xTaskCreate(recover_task, "can_recover", 3072, NULL, 11, &s_recover_task);
+
+    twai_event_callbacks_t cbs = { .on_rx_done = on_rx_done,
+                                   .on_state_change = on_state_change };
     ESP_ERROR_CHECK(twai_node_register_event_callbacks(s_node, &cbs, NULL));
     ESP_ERROR_CHECK(twai_node_enable(s_node));
 
