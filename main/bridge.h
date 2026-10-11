@@ -26,9 +26,10 @@ typedef struct {
     int      state;
     uint16_t tx_error_count;
     uint16_t rx_error_count;
-    uint32_t bus_err_num;   // cumulative since twai_node_enable(); this IDF's
-                             // node-TWAI status API has no separate arb_lost
-                             // or rx_overrun counter
+    uint32_t bus_err_num;   // IDF's cumulative count: real bus errors AND lost
+                             // arbitration (both bump it). Kept for reference.
+    uint32_t arb_lost;      // lost arbitration – normal CAN, not an error
+    uint32_t err_bit, err_form, err_stuff, err_ack;   // real bus errors by type
 } bridge_can_health_t;
 
 // Returns false (h left untouched) if the node isn't up yet or the read failed.

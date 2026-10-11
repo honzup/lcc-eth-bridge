@@ -143,9 +143,14 @@ static esp_err_t status_get(httpd_req_t *req) {
 
     if (have_health) {
         n += snprintf(body + n, sizeof(body) - n,
-            "can_state: %s  tx_err: %u  rx_err: %u  bus_err: %lu\n",
+            "can_state: %s  tx_err: %u  rx_err: %u\n"
+            "bus_err: %lu  (bit %lu  form %lu  stuff %lu  ack %lu)\n"
+            "arb_lost: %lu  (normal CAN; idf_err_events: %lu)\n",
             can_state_str(h.state), h.tx_error_count, h.rx_error_count,
-            (unsigned long)h.bus_err_num);
+            (unsigned long)(h.err_bit + h.err_form + h.err_stuff + h.err_ack),
+            (unsigned long)h.err_bit, (unsigned long)h.err_form,
+            (unsigned long)h.err_stuff, (unsigned long)h.err_ack,
+            (unsigned long)h.arb_lost, (unsigned long)h.bus_err_num);
     } else {
         n += snprintf(body + n, sizeof(body) - n, "can_state: unavailable\n");
     }

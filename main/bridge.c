@@ -36,6 +36,10 @@ static volatile uint32_t  s_tx_drops = 0;  // frames dropped when s_tx_q is full
 static volatile uint32_t  s_tx_q_max = 0;  // peak s_tx_q occupancy seen since boot (observability)
 static volatile uint32_t  s_rx_drops = 0;  // frames dropped when s_rx_q is full (ISR couldn't enqueue)
 static volatile uint32_t  s_rx_q_max = 0;  // peak s_rx_q occupancy seen since boot (observability)
+// IDF's bus_err_num lumps lost arbitration (normal CAN) in with real errors, so
+// split them here from the on_error flags. One ISR event can carry both.
+static volatile uint32_t  s_arb_lost = 0;
+static volatile uint32_t  s_err_bit = 0, s_err_form = 0, s_err_stuff = 0, s_err_ack = 0;
 static SemaphoreHandle_t  s_lock;
 static int                s_client = -1;  // single JMRI connection
 static TaskHandle_t       s_recover_task = NULL;  // notified from ISR on BUS_OFF
@@ -71,6 +75,17 @@ static IRAM_ATTR bool on_state_change(twai_node_handle_t h,
     BaseType_t hpw = pdFALSE;
     vTaskNotifyGiveFromISR(s_recover_task, &hpw);
     return hpw == pdTRUE;
+}
+
+// ---- TWAI error event (ISR): classify into arbitration loss vs real bus errors ----
+static IRAM_ATTR bool on_error(twai_node_handle_t h, const twai_error_event_data_t *e, void *ctx) {
+    (void)h; (void)ctx;
+    if (e->err_flags.arb_lost)  s_arb_lost++;
+    if (e->err_flags.bit_err)   s_err_bit++;
+    if (e->err_flags.form_err)  s_err_form++;
+    if (e->err_flags.stuff_err) s_err_stuff++;
+    if (e->err_flags.ack_err)   s_err_ack++;
+    return false;
 }
 
 static void recover_task(void *arg) {
@@ -247,7 +262,8 @@ void bridge_start(void) {
     xTaskCreate(recover_task, "can_recover", 3072, NULL, 11, &s_recover_task);
 
     twai_event_callbacks_t cbs = { .on_rx_done = on_rx_done,
-                                   .on_state_change = on_state_change };
+                                   .on_state_change = on_state_change,
+                                   .on_error = on_error };
     ESP_ERROR_CHECK(twai_node_register_event_callbacks(s_node, &cbs, NULL));
     ESP_ERROR_CHECK(twai_node_enable(s_node));
 
@@ -286,5 +302,10 @@ bool bridge_can_health(bridge_can_health_t *h) {
     h->tx_error_count  = st.tx_error_count;
     h->rx_error_count  = st.rx_error_count;
     h->bus_err_num     = rec.bus_err_num;
+    h->arb_lost        = s_arb_lost;
+    h->err_bit         = s_err_bit;
+    h->err_form        = s_err_form;
+    h->err_stuff       = s_err_stuff;
+    h->err_ack         = s_err_ack;
     return true;
 }
