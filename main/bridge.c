@@ -225,6 +225,18 @@ void bridge_start(void) {
 #endif
     ESP_ERROR_CHECK(twai_new_node_onchip(&cfg, &s_node));
 
+    // Match the fleet nodes' bit timing exactly (OpenMRNLite uses IDF's
+    // TWAI_TIMING_CONFIG_125KBITS: 2 MHz quanta, 1+11+4 = 16 tq, 75% sample
+    // point, SJW 3). Left to `bitrate` alone, IDF picks 20 tq / 85% / SJW 1 on
+    // the P4, and the SJW-1 receiver logged bus errors whenever several nodes
+    // arbitrated at once (every JMRI-client connect). Must be set while the
+    // node is still stopped, i.e. before twai_node_enable().
+    // 40 MHz XTAL / brp 20 = 2 MHz quanta.
+    const twai_timing_advanced_config_t lcc_timing = {
+        .brp = 20, .prop_seg = 0, .tseg_1 = 11, .tseg_2 = 4, .sjw = 3,
+    };
+    ESP_ERROR_CHECK(twai_node_reconfig_timing(s_node, &lcc_timing, NULL));
+
     // Accept-all filter (mask=0 → every bit "don't care"). LCC is all 29-bit
     // extended IDs. Without this the node receives nothing — bus→JMRI would be dead.
     twai_mask_filter_config_t fc = { .id = 0, .mask = 0, .is_ext = true };
