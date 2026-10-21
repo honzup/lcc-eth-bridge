@@ -56,7 +56,7 @@ idf.py -p /dev/ttyACM0 -b 460800 flash monitor
 `OTA_TOKEN` is optional, but it also switches on the status page – see
 **Status page** and **OTA updates** below.
 
-### Chip revision – the one setting that depends on your silicon
+### Chip revision – the one setting that depends on your board
 
 ESP32-P4 rev < 3.0 (early engineering samples) and rev ≥ 3.0 (production) need
 **different builds**. `sdkconfig.defaults` here targets the **v1.x sample** this
