@@ -18,6 +18,57 @@ adapter such as the MERG CANUSB4.
    ESP32-P4-ETH  ──Ethernet──▶  LAN  ──▶  JMRI (OpenLCB, GridConnect over TCP :12021)
 ```
 
+## Quick start
+
+**You need:** a Waveshare ESP32-P4-ETH, a 3.3 V CAN transceiver (board or
+module), a USB-C cable, an Ethernet connection to the same LAN as JMRI, and a
+Linux/macOS/Windows PC for building.
+
+1. **Install ESP-IDF v5.5** (once). On Linux/macOS:
+   ```bash
+   git clone -b release/v5.5 --recursive https://github.com/espressif/esp-idf.git ~/esp/esp-idf
+   ~/esp/esp-idf/install.sh esp32p4
+   ```
+   On Windows use Espressif's ESP-IDF installer and pick v5.5.
+2. **Get the code:**
+   ```bash
+   git clone <this repository's URL> lcc-eth-bridge
+   cd lcc-eth-bridge
+   . ~/esp/esp-idf/export.sh        # in every new terminal
+   idf.py set-target esp32p4
+   ```
+3. **Check your chip revision.** Plug the board in by USB and run
+   `esptool.py --chip esp32p4 -p /dev/ttyACM0 chip_id` (the port may differ;
+   on Windows it's a `COMx` port). If it reports **revision v3.x**, delete the
+   two `CONFIG_ESP32P4_...REV...` lines from `sdkconfig.defaults` and then delete
+   the generated `sdkconfig` file. Leave them for a **v1.x** board. See
+   **Chip revision** below.
+4. **Choose an OTA token** (any password-like string). It enables the status
+   page and network updates. Keep it in a file:
+   ```bash
+   mkdir -p ~/.config && echo -n '<your-secret>' > ~/.config/lcc-eth-bridge-ota.token
+   chmod 600 ~/.config/lcc-eth-bridge-ota.token
+   ```
+5. **Build and flash over USB:**
+   ```bash
+   OTA_TOKEN=$(cat ~/.config/lcc-eth-bridge-ota.token) idf.py build
+   idf.py -p /dev/ttyACM0 -b 460800 flash monitor
+   ```
+   Exit the monitor with `Ctrl+]`.
+6. **Wire the transceiver** with the power off – see **Hardware and wiring**.
+   Termination goes only at the two ends of the bus.
+7. **Connect Ethernet and power up.** The console shows `ETH got IP: <address>`.
+   Give that address a DHCP reservation in your router.
+8. **Check the bridge:** open `http://<address>/` in a browser. You should see
+   `can_state: ACTIVE` and zero drops.
+9. **Connect JMRI:** Preferences → Connections → add **OpenLCB**, connection
+   **CAN via GridConnect Network Interface**, host `<address>`, port **12021**,
+   then restart JMRI. Your nodes should appear under **OpenLCB → Open LccPro**
+   (or **OpenLCB → Configure Nodes**).
+
+Later firmware updates go over the network: `scripts/ota-push.sh <address>`
+(see **OTA updates**).
+
 ## Hardware and wiring
 
 Any 3.3 V CAN transceiver works (TCAN332, TCAN33x, SN65HVD230 …) – it is
