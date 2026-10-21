@@ -13,7 +13,7 @@
 
 #define TAG "ota"
 
-// ponytail: fixed 4 KB chunk buffer on the stack; plenty for LAN push, no
+// Fixed 4 KB chunk buffer on the stack; plenty for LAN push, no
 // heap churn. Bump if you ever want to trade RAM for fewer recv() calls.
 #define OTA_CHUNK 4096
 

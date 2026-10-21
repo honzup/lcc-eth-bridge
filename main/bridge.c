@@ -43,8 +43,8 @@ static volatile uint32_t  s_err_bit = 0, s_err_form = 0, s_err_stuff = 0, s_err_
 static SemaphoreHandle_t  s_lock;
 static int                s_client = -1;  // single JMRI connection
 static TaskHandle_t       s_recover_task = NULL;  // notified from ISR on BUS_OFF
-// ponytail: single client + one global lock. Fan out to an fd-list if you ever
-// need more than one JMRI/tool attached at once.
+// Single client + one global lock by design (JMRI is the only client; other
+// tools join through the JMRI hub). Use an fd list if you ever need more.
 
 // ---- TWAI RX (ISR) -> queue ----
 static IRAM_ATTR bool on_rx_done(twai_node_handle_t h,
@@ -110,7 +110,7 @@ static void can_to_net_task(void *arg) {
 #ifdef LCC_SELFTEST
         ESP_LOGI(TAG, "SELFTEST RX  %s", line);   // frame looped back to us
 #endif
-        // ponytail: keep the lock across send() rather than copy-fd-then-send.
+        // Keep the lock across send() rather than copy-fd-then-send.
         // A bare copy would race net_task closing/reusing the fd (send to a stale
         // or reassigned descriptor). The send is bounded instead by SO_SNDTIMEO
         // (set in net_task), so the hold is capped at that timeout, not forever.

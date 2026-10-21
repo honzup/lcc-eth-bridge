@@ -11,7 +11,7 @@
 //   idf.py create-project-from-example "espressif/esp-idf:examples/ethernet/basic"
 // configured for esp32p4, and copy its exact PHY/pin/clock settings here.
 #define BOARD_ETH_PHY_ADDR      1
-#define BOARD_ETH_PHY_RST_GPIO  51   // hint from source chat — VERIFY (-1 = no reset line)
+#define BOARD_ETH_PHY_RST_GPIO  51   // PHY reset pin (-1 = no reset line) – check your board's schematic
 // MDC/MDIO/RMII pins come from the esp32p4 ETH_ESP32_EMAC_DEFAULT_CONFIG (MDC=31,
 // MDIO=52) — the P4 devkit map, which matches the "31/52/51/50" schematic hint.
 // If the board uses a PHY other than IP101, change esp_eth_phy_new_ip101() in main.c.
