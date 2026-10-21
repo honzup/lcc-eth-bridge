@@ -174,3 +174,7 @@ Run `write_test.py` against a node after any change to the transmit path.
 - A self-test build (`LCC_SELFTEST=1 idf.py build`, after `rm -rf build`)
   loops frames back inside the controller to check the driver and codec with
   nothing wired.
+
+## Licence
+
+MIT – see `LICENSE`.
