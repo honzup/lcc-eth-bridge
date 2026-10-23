@@ -1,0 +1,3 @@
+# ESP32-P4 only (applied automatically when the target is esp32p4)
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y

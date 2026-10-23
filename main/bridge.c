@@ -246,9 +246,9 @@ void bridge_start(void) {
     // the P4, and the SJW-1 receiver logged bus errors whenever several nodes
     // arbitrated at once (every JMRI-client connect). Must be set while the
     // node is still stopped, i.e. before twai_node_enable().
-    // 40 MHz XTAL / brp 20 = 2 MHz quanta.
+    // brp gives 2 MHz quanta: P4 40 MHz / 20, classic ESP32 80 MHz / 40 (board_config.h).
     const twai_timing_advanced_config_t lcc_timing = {
-        .brp = 20, .prop_seg = 0, .tseg_1 = 11, .tseg_2 = 4, .sjw = 3,
+        .brp = BOARD_TWAI_BRP, .prop_seg = 0, .tseg_1 = 11, .tseg_2 = 4, .sjw = 3,
     };
     ESP_ERROR_CHECK(twai_node_reconfig_timing(s_node, &lcc_timing, NULL));
 

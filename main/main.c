@@ -8,6 +8,11 @@
 #include "esp_eth.h"
 #include "esp_eth_mac_esp.h"     // eth_esp32_emac_config_t (IDF 5.5)
 #include "nvs_flash.h"
+#ifdef BOARD_ETH_OSC_EN_GPIO
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
 
 #define TAG "main"
 
@@ -53,6 +58,13 @@ static void ethernet_start(void) {
     esp_netif_config_t nc = ESP_NETIF_DEFAULT_ETH();
     esp_netif_t *neti = esp_netif_new(&nc);
 
+#ifdef BOARD_ETH_OSC_EN_GPIO
+    // WT32-ETH01: switch on the PHY's 50 MHz oscillator before the EMAC needs its clock.
+    gpio_reset_pin(BOARD_ETH_OSC_EN_GPIO);
+    gpio_set_direction(BOARD_ETH_OSC_EN_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(BOARD_ETH_OSC_EN_GPIO, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+#endif
     eth_mac_config_t mac_cfg = ETH_MAC_DEFAULT_CONFIG();
     // The esp32p4 DEFAULT_CONFIG already supplies the P4 devkit RMII map
     // (MDC=31, MDIO=52, EXT_IN clock, data pins via GPIO matrix). Waveshare
@@ -63,7 +75,11 @@ static void ethernet_start(void) {
     eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
     phy_cfg.phy_addr       = BOARD_ETH_PHY_ADDR;
     phy_cfg.reset_gpio_num = BOARD_ETH_PHY_RST_GPIO;
+#ifdef BOARD_ETH_PHY_LAN87XX
+    esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_cfg);
+#else
     esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_cfg);  // swap if board uses another PHY
+#endif
 
     esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
     esp_eth_handle_t eth = NULL;
