@@ -8,3 +8,5 @@ dependencies.lock
 # Python
 __pycache__/
 *.pyc
+build-*/
+sdkconfig.esp32

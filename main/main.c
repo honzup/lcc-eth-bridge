@@ -8,6 +8,11 @@
 #include "esp_eth.h"
 #include "esp_eth_mac_esp.h"     // eth_esp32_emac_config_t (IDF 5.5)
 #include "nvs_flash.h"
+#ifdef BOARD_ETH_OSC_EN_GPIO
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#endif
 
 #define TAG "main"
 
@@ -48,22 +53,50 @@ static void on_eth_event(void *arg, esp_event_base_t base, int32_t id, void *dat
 }
 
 static void ethernet_start(void) {
+#ifdef BOARD_ETH_OSC_EN_GPIO
+    // WT32-ETH01: power-cycle the PHY's 50 MHz oscillator and let it settle
+    // BEFORE the EMAC is installed (the EMAC soft reset needs the clock on GPIO0).
+    gpio_reset_pin(BOARD_ETH_OSC_EN_GPIO);
+    gpio_set_direction(BOARD_ETH_OSC_EN_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(BOARD_ETH_OSC_EN_GPIO, 0);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    gpio_set_level(BOARD_ETH_OSC_EN_GPIO, 1);
+    vTaskDelay(pdMS_TO_TICKS(200));
+#endif
+
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_config_t nc = ESP_NETIF_DEFAULT_ETH();
     esp_netif_t *neti = esp_netif_new(&nc);
 
     eth_mac_config_t mac_cfg = ETH_MAC_DEFAULT_CONFIG();
-    // The esp32p4 DEFAULT_CONFIG already supplies the P4 devkit RMII map
-    // (MDC=31, MDIO=52, EXT_IN clock, data pins via GPIO matrix). Waveshare
-    // follows that layout; override here only if the schematic differs.
     eth_esp32_emac_config_t emac_cfg = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+
+#if CONFIG_IDF_TARGET_ESP32
+    // WT32-ETH01 (classic ESP32): RMII, 50 MHz clock IN on GPIO0, MDC=23, MDIO=18.
+    // Data pins are fixed by the chip (19, 21, 22, 25, 26, 27).
+    mac_cfg.sw_reset_timeout_ms = 1000;
+    emac_cfg.smi_gpio.mdc_num  = 23;
+    emac_cfg.smi_gpio.mdio_num = 18;
+    emac_cfg.interface = EMAC_DATA_INTERFACE_RMII;
+    emac_cfg.clock_config.rmii.clock_mode = EMAC_CLK_EXT_IN;
+    emac_cfg.clock_config.rmii.clock_gpio = EMAC_CLK_IN_GPIO;   // GPIO0
+#else
+    // Waveshare ESP32-P4-ETH: the esp32p4 DEFAULT_CONFIG already supplies the
+    // P4 devkit RMII map (MDC=31, MDIO=52, EXT_IN clock, data pins via GPIO
+    // matrix). Override here only if the schematic differs.
+#endif
+
     esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&emac_cfg, &mac_cfg);
 
     eth_phy_config_t phy_cfg = ETH_PHY_DEFAULT_CONFIG();
     phy_cfg.phy_addr       = BOARD_ETH_PHY_ADDR;
     phy_cfg.reset_gpio_num = BOARD_ETH_PHY_RST_GPIO;
+#ifdef BOARD_ETH_PHY_LAN87XX
+    esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_cfg);
+#else
     esp_eth_phy_t *phy = esp_eth_phy_new_ip101(&phy_cfg);  // swap if board uses another PHY
+#endif
 
     esp_eth_config_t eth_cfg = ETH_DEFAULT_CONFIG(mac, phy);
     esp_eth_handle_t eth = NULL;

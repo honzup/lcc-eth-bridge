@@ -130,6 +130,31 @@ bridge: GridConnect server on :12021
 main: ETH got IP: <address>  -> point JMRI ... port 12021
 ```
 
+### WT32-ETH01 (classic ESP32) – untested
+
+The same code also builds for a **WT32-ETH01** (classic ESP32 + LAN8720
+Ethernet). It compiles, but I haven't run it on hardware – reports welcome.
+Everything board-specific is in `main/board_config.h`, selected by the target:
+
+| | ESP32-P4-ETH | WT32-ETH01 |
+|---|---|---|
+| Build target | `esp32p4` | `esp32` |
+| CAN TX / RX | GPIO20 / GPIO21 | GPIO33 / GPIO32 |
+| Ethernet PHY | IP101 | LAN8720 (address 1), oscillator enabled on GPIO16 |
+| TWAI prescaler | 20 (40 MHz clock) | 40 (80 MHz clock) |
+
+```bash
+idf.py set-target esp32
+OTA_TOKEN=<your-secret> idf.py build
+```
+
+The P4-only settings live in `sdkconfig.defaults.esp32p4`, which ESP-IDF only
+applies to P4 builds. The WT32-ETH01 has **no USB**: the first flash needs a
+3.3 V USB-serial adapter on TX0/RX0 and GND, with **IO0 linked to GND** while it
+resets (remove the link afterwards). After that, update over the network with
+`scripts/ota-push.sh`. Give it a solid 5 V supply (or a PoE splitter with 5 V
+output) – a weak supply is a common reason the Ethernet doesn't start.
+
 ## JMRI
 
 Preferences → Connections → add **OpenLCB**, system connection
